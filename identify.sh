@@ -12,7 +12,16 @@ echo "SBC / Board:"
 model=""
 [ -f /proc/device-tree/model ] && model=$(tr -d '\0' < /proc/device-tree/model 2>/dev/null)
 [ -z "$model" ] && [ -f /sys/firmware/devicetree/base/model ] && model=$(tr -d '\0' < /sys/firmware/devicetree/base/model 2>/dev/null)
-[ -n "$model" ] && echo "  Model: $model"
+if [ -n "$model" ]; then
+    echo "  Model: $model"
+elif [ -d /sys/class/dmi/id ]; then
+    # x86/PC: use DMI (SMBIOS) info
+    vendor=$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null | tr -d '\n')
+    product=$(cat /sys/class/dmi/id/product_name 2>/dev/null | tr -d '\n')
+    board=$(cat /sys/class/dmi/id/board_name 2>/dev/null | tr -d '\n')
+    [ -n "$vendor" ] && [ -n "$product" ] && echo "  System: $vendor $product"
+    [ -n "$board" ] && [ "$board" != "Default string" ] && echo "  Board: $board"
+fi
 if [ -f /etc/armbian-release ]; then
     . /etc/armbian-release 2>/dev/null
     [ -n "$BOARD" ] && echo "  Board: $BOARD"
@@ -21,6 +30,7 @@ if [ -f /proc/cpuinfo ]; then
     cpu=$(grep -m1 "Hardware" /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs)
     [ -n "$cpu" ] && echo "  Hardware: $cpu"
 fi
+[ -z "$model" ] && [ -z "$vendor" ] && echo "  (Generic $(uname -m) system)"
 echo ""
 
 # --- OS ---
@@ -36,17 +46,30 @@ echo ""
 
 # --- Storage ---
 echo "Storage:"
-root_dev=$(findmnt -n -o SOURCE / 2>/dev/null | sed 's/[0-9]*$//' | sed 's/p$//')
-[ -z "$root_dev" ] && root_dev=$(df / 2>/dev/null | tail -1 | awk '{print $1}' | sed 's/[0-9]*$//' | sed 's/p$//')
+root_dev=$(findmnt -n -o SOURCE / 2>/dev/null)
+[ -z "$root_dev" ] && root_dev=$(df / 2>/dev/null | tail -1 | awk '{print $1}')
+
+# Trace LVM/RAID/mapper back to the physical disk
+base_dev=""
+if command -v lsblk &>/dev/null && [ -n "$root_dev" ]; then
+    current=$(lsblk -n -o KNAME "$root_dev" 2>/dev/null | head -1)
+    while [ -n "$current" ]; do
+        dtype=$(lsblk -n -o TYPE "/dev/$current" 2>/dev/null | head -1)
+        if [ "$dtype" = "disk" ]; then
+            base_dev="$current"
+            break
+        fi
+        parent=$(lsblk -n -o PKNAME "/dev/$current" 2>/dev/null | head -1)
+        [ -z "$parent" ] && break
+        current="$parent"
+    done
+fi
+[ -z "$base_dev" ] && base_dev=$(basename "$root_dev" 2>/dev/null | sed 's/[0-9]*$//' | sed 's/p$//')
 
 storage_type=""
-if [ -n "$root_dev" ]; then
-    base_dev=$(basename "$root_dev")
-    # Detect storage type (what the system is running on)
+if [ -n "$base_dev" ]; then
     if [[ "$base_dev" == mmcblk* ]]; then
-        if [ -f /sys/block/$base_dev/device/type ]; then
-            stype=$(cat /sys/block/$base_dev/device/type 2>/dev/null)
-        fi
+        stype=$(cat /sys/block/$base_dev/device/type 2>/dev/null)
         if [ "$stype" = "SD" ]; then
             storage_type="SD Card"
         elif [ "$stype" = "MMC" ]; then
