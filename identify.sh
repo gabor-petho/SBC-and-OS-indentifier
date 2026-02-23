@@ -51,17 +51,25 @@ root_dev=$(findmnt -n -o SOURCE / 2>/dev/null)
 
 # Trace LVM/RAID/mapper back to the physical disk
 base_dev=""
+# Method 1: lsblk -s shows inverse tree (device -> parents -> disk)
 if command -v lsblk &>/dev/null && [ -n "$root_dev" ]; then
-    current=$(lsblk -n -o KNAME "$root_dev" 2>/dev/null | head -1)
+    base_dev=$(lsblk -s -o NAME,TYPE -n "$root_dev" 2>/dev/null | awk '$2=="disk" {d=$1} END {print d}')
+fi
+# Method 2: sysfs walk (works when lsblk -s fails)
+if [ -z "$base_dev" ] && [ -n "$root_dev" ]; then
+    current=$(basename "$(readlink -f "$root_dev" 2>/dev/null)" 2>/dev/null)
     while [ -n "$current" ]; do
-        dtype=$(lsblk -n -o TYPE "/dev/$current" 2>/dev/null | head -1)
-        if [ "$dtype" = "disk" ]; then
+        if [ -e "/sys/block/$current" ]; then
             base_dev="$current"
             break
         fi
-        parent=$(lsblk -n -o PKNAME "/dev/$current" 2>/dev/null | head -1)
-        [ -z "$parent" ] && break
-        current="$parent"
+        if [ -d "/sys/class/block/$current/slaves" ]; then
+            current=$(ls /sys/class/block/$current/slaves/ 2>/dev/null | head -1)
+        elif [ -e "/sys/class/block/$current/.." ]; then
+            current=$(basename "$(readlink -f /sys/class/block/$current/.. 2>/dev/null)" 2>/dev/null)
+        else
+            break
+        fi
     done
 fi
 [ -z "$base_dev" ] && base_dev=$(basename "$root_dev" 2>/dev/null | sed 's/[0-9]*$//' | sed 's/p$//')
