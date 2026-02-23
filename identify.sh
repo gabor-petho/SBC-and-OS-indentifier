@@ -36,43 +36,47 @@ echo ""
 
 # --- Storage ---
 echo "Storage:"
-if command -v lsblk &>/dev/null; then
-    root_dev=$(findmnt -n -o SOURCE / 2>/dev/null | sed 's/[0-9]*$//' | sed 's/p$//')
-    [ -z "$root_dev" ] && root_dev=$(df / 2>/dev/null | tail -1 | awk '{print $1}' | sed 's/[0-9]*$//' | sed 's/p$//')
-    
-    if [ -n "$root_dev" ]; then
-        base_dev=$(basename "$root_dev")
-        stype=""
-        # Detect storage type
-        if [[ "$base_dev" == mmcblk* ]]; then
-            if [ -d "/sys/block/$base_dev" ]; then
-                if [ -f /sys/block/$base_dev/device/type ]; then
-                    stype=$(cat /sys/block/$base_dev/device/type 2>/dev/null)
-                fi
-                if [ "$stype" = "SD" ]; then
-                    echo "  Type: SD Card"
-                elif [ "$stype" = "MMC" ]; then
-                    echo "  Type: eMMC"
-                elif [[ "$base_dev" == mmcblk0 ]]; then
-                    echo "  Type: eMMC (likely)"
-                elif [[ "$base_dev" == mmcblk1 ]]; then
-                    echo "  Type: SD Card (likely)"
-                else
-                    echo "  Type: MMC (SD/eMMC)"
-                fi
-            fi
-        elif [[ "$base_dev" == nvme* ]]; then
-            echo "  Type: NVMe SSD"
-        elif [[ "$base_dev" == sd* ]]; then
-            rota=$(cat /sys/block/$base_dev/queue/rotational 2>/dev/null)
-            [ "$rota" = "0" ] && echo "  Type: SSD"
-            [ "$rota" = "1" ] && echo "  Type: HDD"
+root_dev=$(findmnt -n -o SOURCE / 2>/dev/null | sed 's/[0-9]*$//' | sed 's/p$//')
+[ -z "$root_dev" ] && root_dev=$(df / 2>/dev/null | tail -1 | awk '{print $1}' | sed 's/[0-9]*$//' | sed 's/p$//')
+
+storage_type=""
+if [ -n "$root_dev" ]; then
+    base_dev=$(basename "$root_dev")
+    # Detect storage type (what the system is running on)
+    if [[ "$base_dev" == mmcblk* ]]; then
+        if [ -f /sys/block/$base_dev/device/type ]; then
+            stype=$(cat /sys/block/$base_dev/device/type 2>/dev/null)
         fi
-        size=$(lsblk -b -d -n -o SIZE "/dev/$base_dev" 2>/dev/null | head -1)
-        if [ -n "$size" ]; then
-            size_gb=$((size / 1024 / 1024 / 1024))
-            echo "  Size: ${size_gb} GB"
+        if [ "$stype" = "SD" ]; then
+            storage_type="SD Card"
+        elif [ "$stype" = "MMC" ]; then
+            storage_type="eMMC"
+        elif [[ "$base_dev" == mmcblk0 ]]; then
+            storage_type="eMMC (likely)"
+        elif [[ "$base_dev" == mmcblk1 ]]; then
+            storage_type="SD Card (likely)"
+        else
+            storage_type="MMC (SD/eMMC)"
         fi
+    elif [[ "$base_dev" == nvme* ]]; then
+        storage_type="NVMe SSD"
+    elif [[ "$base_dev" == sd* ]]; then
+        rota=$(cat /sys/block/$base_dev/queue/rotational 2>/dev/null)
+        [ "$rota" = "0" ] && storage_type="SSD"
+        [ "$rota" = "1" ] && storage_type="HDD"
+        [ -z "$storage_type" ] && storage_type="USB/Removable"
+    else
+        storage_type="$base_dev"
+    fi
+fi
+[ -z "$storage_type" ] && storage_type="Unknown"
+echo "  Running on: $storage_type"
+
+if command -v lsblk &>/dev/null && [ -n "$base_dev" ]; then
+    size=$(lsblk -b -d -n -o SIZE "/dev/$base_dev" 2>/dev/null | head -1)
+    if [ -n "$size" ]; then
+        size_gb=$((size / 1024 / 1024 / 1024))
+        echo "  Size: ${size_gb} GB"
     fi
 fi
 # Root filesystem usage (works even without lsblk)
