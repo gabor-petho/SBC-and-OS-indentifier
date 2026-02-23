@@ -53,7 +53,7 @@ root_dev=$(findmnt -n -o SOURCE / 2>/dev/null)
 base_dev=""
 # Method 1: lsblk -s shows inverse tree (device -> parents -> disk)
 if command -v lsblk &>/dev/null && [ -n "$root_dev" ]; then
-    base_dev=$(lsblk -s -o NAME,TYPE -n "$root_dev" 2>/dev/null | awk '$2=="disk" {d=$1} END {print d}')
+    base_dev=$(lsblk -s -o NAME,TYPE -n "$root_dev" 2>/dev/null | awk '$2=="disk" {gsub(/[^a-zA-Z0-9]/, "", $1); d=$1} END {print d}')
 fi
 # Method 2: sysfs walk (works when lsblk -s fails)
 if [ -z "$base_dev" ] && [ -n "$root_dev" ]; then
